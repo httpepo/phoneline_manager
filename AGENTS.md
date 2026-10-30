@@ -9,8 +9,9 @@ de código e testes.
 - Mantenha um único aplicativo Next.js com backend integrado. Não introduza
   Express, outro servidor, Server Actions, banco de dados, ORM, filas ou workers.
 - Use TanStack Query para as chamadas do navegador; shadcn/ui e Tailwind CSS
-  para a interface; Fetch para chamadas HTTP; Zod para validação; Vitest e
-  Testing Library para testes.
+  para a interface; Fetch para chamadas HTTP; Zod para validação; Orval para
+  geração de código a partir do OpenAPI; Scalar (via CDN, sem pacotes extras)
+  para documentação interativa da API; Vitest e Testing Library para testes.
 - Use os pacotes e convenções existentes no workspace. Instale outra
   dependência ou substitua a stack somente após apresentar o motivo, as
   alternativas, os custos e obter aprovação.
@@ -26,8 +27,9 @@ separadas e dependências direcionadas para dentro:
    visuais e interação com a API. Os componentes não acessam a TOM nem o
    armazenamento.
 2. **Adaptadores HTTP — `src/app/api`:** Route Handlers que validam a entrada,
-   chamam os casos de uso e convertem seus resultados em respostas HTTP.
-   Não implemente regras de negócio nos handlers.
+   chamam os casos de uso e convertem seus resultados em respostas HTTP (além de
+   servir a documentação interativa do Scalar em `/api/docs`). Não implemente
+   regras de negócio nos handlers.
 3. **Aplicação — `src/server/application`:** casos de uso para preparar,
    executar, consultar e listar. Coordena portas e regras sem depender do
    Next.js ou do transporte HTTP.
@@ -72,14 +74,23 @@ chamada diretamente pela interface.
 - Antes de mudar código existente, confira sua implementação; não presuma que
   rotas, componentes ou testes descritos em interfaces já estão implementados.
 
-## 4. Contrato HTTP e geração de código
+## 4. Contrato HTTP, geração de código e documentação (OpenAPI + Orval + Scalar)
 
-- `lib/api-spec/openapi.yaml` é a fonte canônica do contrato HTTP.
+- `lib/api-spec/openapi.yaml` é a fonte canônica única do contrato HTTP, tanto
+  para a geração de código (Orval) quanto para a documentação interativa
+  (Scalar).
 - Gere os clientes React Query e schemas Zod com
   `pnpm --filter @workspace/api-spec run codegen`. Nunca edite os arquivos
   gerados à mão.
 - Preserve `info.title: Api`, `servers.url: /api`, os operation IDs existentes
   e o mutator `customFetch`; a geração depende dessas convenções.
+- Exponha a documentação interativa da API em `GET /api/docs`
+  (`src/app/api/docs/route.ts`) usando o Scalar via CDN oficial
+  (`https://cdn.jsdelivr.net/npm/@scalar/api-reference`), lendo diretamente o
+  `lib/api-spec/openapi.yaml` do disco sem duplicar a especificação e sem
+  instalar dependências extras.
+- Mantenha `summary`, `description` e exemplos claros no `openapi.yaml` para que
+  a referência do Scalar permaneça completa e legível.
 - Endpoints obrigatórios:
   - `POST /api/requests`: valida e prepara; devolve `201`. Não chama a TOM.
   - `GET /api/requests/{code}`: consulta apenas o estado local; nunca cria nem
@@ -88,13 +99,16 @@ chamada diretamente pela interface.
     corpo que possa alterar DDD, plano ou código; devolve `200`, ou `202` se
     esse mesmo pedido já estiver processando.
   - `GET /api/lines`: lista exclusivamente linhas confirmadas.
+  - `GET /api/docs`: renderiza a referência interativa do Scalar a partir do
+    `openapi.yaml`.
 - Para códigos desconhecidos ou perdidos, devolva `404`. Validação inválida
   devolve `400`. Mantenha erros no formato `{ error, code, fieldErrors? }`;
   não exponha stack traces, credenciais nem respostas brutas da TOM.
 - Use `runtime = "nodejs"`, `dynamic = "force-dynamic"` e
-  `Cache-Control: no-store` nas rotas de negócio.
+  `Cache-Control: no-store` nas rotas de negócio e em `/api/docs`.
 - Toda mudança no formato HTTP começa no OpenAPI. Em seguida, regenere os
-  clientes e schemas e atualize os testes e consumidores afetados.
+  clientes e schemas, verifique a renderização no Scalar e atualize os testes e
+  consumidores afetados.
 
 ## 5. Modelo e invariantes do domínio
 
@@ -206,5 +220,6 @@ chamada diretamente pela interface.
   - `pnpm --filter @workspace/salvy run typecheck`
   - `pnpm --filter @workspace/salvy run test`
   - `pnpm run typecheck`
-- Mudanças em `lib/api-spec/openapi.yaml` também exigem regeneração via Orval e
-  testes do cliente e dos endpoints afetados.
+- Mudanças em `lib/api-spec/openapi.yaml` também exigem regeneração via Orval,
+  verificação da documentação interativa no Scalar (`/api/docs`) e testes do
+  cliente e dos endpoints afetados.
