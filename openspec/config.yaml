@@ -1,0 +1,69 @@
+schema: spec-driven
+
+context: |
+  Projeto: Salvy — Monólito modular em um único app Next.js (App Router) com backend Node.js integrado.
+  Idioma: Escreva todos os artefatos (proposal, specs, design, tasks) e comentários em Português (pt-BR).
+
+  Stack e Limites Arquiteturais:
+  - Frontend/Backend: Next.js (App Router), React, TypeScript estrito (proibido `any`, use `unknown` + validação para dados externos), Node.js, Route Handlers.
+  - UI e Estado: Tailwind CSS, shadcn/ui, TanStack Query (via hooks gerados em `@workspace/api-client-react`), Fetch nativo, Zod.
+  - Testes: Vitest e Testing Library.
+  - Proibições: NÃO introduza Express, outro servidor, Server Actions, banco de dados, ORM, filas, workers, CSS Modules, Redux, Axios, TanStack Router ou TanStack Table.
+  - Dependências: Não instale novos pacotes sem apresentar motivo, alternativas, custos e obter aprovação.
+
+  Arquitetura em 5 Camadas (dependências apontam sempre para dentro):
+  1. Interface (`src/app`, `src/components`, `src/hooks`): Server Components por padrão (`"use client"` apenas quando necessário). Lógica compartilhada em hooks (ex: `use-line-workflow.ts`). Não acessa TOM, repositório ou `fetch` direto.
+  2. Adaptadores HTTP (`src/app/api`): Route Handlers (`runtime = "nodejs"`, `dynamic = "force-dynamic"`, `Cache-Control: no-store`). Apenas valida entrada, chama casos de uso e formata resposta HTTP. Sem regras de negócio.
+  3. Aplicação (`src/server/application`): Casos de uso (preparar, executar, consultar, listar) e interfaces mínimas (ports) para repositório e gateway TOM. Sem dependência de Next.js ou HTTP.
+  4. Domínio (`src/server/domain`): Entidades (`Solicitação` != `Linha Confirmada`), estados (`PREPARADA`, `PROCESSANDO`, `CONCLUÍDA`, `FALHA_CONFIRMADA`, `RESULTADO_INCERTO`), transições centralizadas e invariantes. Puro (sem React, Next.js ou HTTP).
+  5. Infraestrutura (`src/server/infrastructure`): Repositório em memória (singleton em `globalThis` para preservar no hot reload) e adaptador TOM (`fetch` nativo).
+
+  Convenções de Código e Contrato:
+  - Imports: `@/` para `artifacts/salvy/src` e `@workspace/*` para pacotes do monorepo. Use `import type` para tipos.
+  - Nomenclatura: `camelCase` (funções/variáveis), `PascalCase` (componentes/tipos), `kebab-case` (arquivos).
+  - OpenAPI: `lib/api-spec/openapi.yaml` é a fonte canônica. Gere código via `pnpm --filter @workspace/api-spec run codegen` (Orval). Nunca edite arquivos gerados manualmente.
+
+rules:
+  proposal:
+    - Verifique a implementação atual antes de propor mudanças; não presuma que rotas, componentes ou testes descritos em interfaces já existem.
+    - Sempre inclua uma seção explícita "Fora de Escopo" (Out of Scope) reforçando que não haverá persistência em banco, filas ou pacotes extras.
+    - Caso a mudança altere contratos HTTP, explicite o impacto no `lib/api-spec/openapi.yaml`.
+
+  specs:
+    - Escreva os cenários em formato Given/When/Then cobrindo estados exatos: `PREPARADA`, `PROCESSANDO`, `CONCLUÍDA`, `FALHA_CONFIRMADA` e `RESULTADO_INCERTO`.
+    - Garanta nos requisitos que:
+      * `POST /api/requests` valida o catálogo (`src/lib/catalog.ts`: DDD válido + planos 1 a 4), gera código com `crypto.randomUUID()`, retorna `201` e NÃO chama a TOM.
+      * `GET /api/requests/{code}` apenas lê o estado local (`404` se desconhecido/reiniciado) sem efeitos colaterais.
+      * `POST /api/requests/{code}/execute` não aceita corpo mutável, marca `PROCESSANDO` sincronamente antes do primeiro `await`, retorna `200` (ou `202` se já estiver processando) e usa o código como `idempotencyKey`.
+      * `GET /api/lines` retorna apenas linhas confirmadas (contendo código da solicitação, `phoneNumber` e timestamp; DDD e plano são derivados da solicitação).
+    - Especifique o tratamento de falhas e incertezas: timeout (60s via `AbortController` cobrindo body), erro de rede, HTTP 5xx ou payload inválido resultam em `RESULTADO_INCERTO` (nunca falha confirmada ou linha fictícia). Uma rejeição posterior não sobrescreve `RESULTADO_INCERTO` anterior.
+    - Especifique os requisitos de UI: salvar código no `sessionStorage` antes de executar (abortar execução se falhar), trava com `useRef` contra duplo clique, retomada após reload apenas via consulta (`GET`) sem reenvio automático, e feedback acessível (sem depender apenas de cor).
+
+  design:
+    - Detalhe a separação estrita entre as 5 camadas e as assinaturas das portas (`Repository` e `TomGateway`) na camada de aplicação.
+    - Se houver alteração de contrato HTTP, desenhe primeiro a mudança no `lib/api-spec/openapi.yaml` preservando `info.title: Api`, `servers.url: /api`, `operationId`s e o mutator `customFetch`.
+    - Documente o controle de concorrência no repositório em memória (transição síncrona para `PROCESSANDO` antes do primeiro `await` e atualização atômica entre solicitação e linha).
+    - Garanta isolamento de segurança na integração TOM (`POST https://1wvur6wjzc.execute-api.us-east-1.amazonaws.com/phone-number`): uso exclusivo de `process.env.TOM_API_KEY` no servidor, bloqueio de redirecionamentos, não repassar `AbortSignal` do navegador para a TOM e logs estruturados sanitizados (sem expor API key, telefone completo, headers ou payload bruto).
+    - Padronize erros HTTP no formato `{ error, code, fieldErrors? }` (`400` para validação, `404` para código não encontrado).
+
+  tasks:
+    - Se houver mudança no contrato HTTP, a Tarefa 1 deve ser atualizar `lib/api-spec/openapi.yaml` e rodar `pnpm --filter @workspace/api-spec run codegen`.
+    - Ordene as tarefas de dentro para fora: 1) Domínio e Catálogo -> 2) Casos de Uso (Aplicação) -> 3) Repositório em Memória e Gateway TOM (Infra) -> 4) Route Handlers (HTTP) -> 5) Hooks e Componentes (UI).
+    - Inclua tarefas obrigatórias de testes unitários (com repositório isolado e gateway TOM fake injetados, sem chamadas reais) cobrindo: catálogo, UUID no servidor, imutabilidade, sucesso, idempotência em `CONCLUÍDA`, bloqueio de concorrência em `PROCESSANDO`, transições de estado, timeout/payload inválido gerando `RESULTADO_INCERTO`, preservação de `RESULTADO_INCERTO`, `404` pós-reinício e retentativa manual.
+    - Inclua tarefas de testes de interface (Testing Library) cobrindo: rótulos/acessibilidade, navegação por teclado, mensagens de erro, sucesso/falha no `sessionStorage`, recuperação após reload sem `POST` automático e bloqueio de duplo clique.
+    - Finalize a lista de tarefas com a execução dos comandos de verificação do workspace.
+
+operations:
+  apply:
+    guidance:
+      - Antes de editar qualquer arquivo, leia a implementação existente para respeitar tipos, helpers e convenções já presentes no monorepo.
+      - Nunca edite manualmente os arquivos gerados pelo Orval; se precisar ajustar tipos ou hooks da API, edite `lib/api-spec/openapi.yaml` e execute `pnpm --filter @workspace/api-spec run codegen`.
+      - No cliente React Query, mantenha `retry: false`, `refetchOnWindowFocus: false` e `refetchOnReconnect: false` para queries, e `retry: false` com `networkMode: "always"` para mutations.
+      - Antes de concluir a implementação, execute obrigatoriamente:
+        1. `pnpm --filter @workspace/salvy run typecheck`
+        2. `pnpm --filter @workspace/salvy run test`
+        3. `pnpm run typecheck`
+
+  archive:
+    guidance:
+      - Confirme que todos os testes unitários e de interface passaram e que nenhum `any`, dado mockado em produção ou log sensível foi introduzido antes de arquivar a mudança.
