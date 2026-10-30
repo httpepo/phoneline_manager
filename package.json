@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "vitest run",
+    "tokens": "node scripts/build-salvy-tokens.mjs"
   },
   "dependencies": {
     "@scalar/nextjs-api-reference": "^0.9.26",
