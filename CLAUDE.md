@@ -5,16 +5,17 @@ de código e testes.
 
 ## 1. Stack e limite arquitetural
 
-- Use Next.js com App Router, TypeScript, React, Node.js e Route Handlers.
+- Use Next.js com App Router, TypeScript, React, Node.js e Route Handlers em um
+  repositório único na raiz (gerenciado com `npm`).
 - Mantenha um único aplicativo Next.js com backend integrado. Não introduza
   Express, outro servidor, Server Actions, banco de dados, ORM, filas ou workers.
 - Use TanStack Query para as chamadas do navegador; shadcn/ui e Tailwind CSS
-  para a interface; Fetch para chamadas HTTP; Zod para validação; Orval para
-  geração de código a partir do OpenAPI; Scalar (via CDN, sem pacotes extras)
-  para documentação interativa da API; Vitest e Testing Library para testes.
-- Use os pacotes e convenções existentes no workspace. Instale outra
-  dependência ou substitua a stack somente após apresentar o motivo, as
-  alternativas, os custos e obter aprovação.
+  para a interface; Fetch nativo para chamadas HTTP; Zod para validação; Orval
+  para geração de código a partir do OpenAPI; Scalar (via CDN, sem pacotes
+  extras) para documentação interativa da API; Vitest e Testing Library para
+  testes.
+- Instale outra dependência ou substitua a stack somente após apresentar o
+  motivo, as alternativas, os custos e obter aprovação. Use sempre `npm`.
 - O backend executa em um processo Node.js local. O armazenamento em memória
   não persiste após reinício e não é compartilhado entre processos.
 
@@ -55,8 +56,7 @@ chamada diretamente pela interface.
 
 ## 3. Organização e convenções de código
 
-- Use `@/` para importar de `artifacts/salvy/src` e `@workspace/*` para pacotes
-  compartilhados do monorepo.
+- Use `@/` para importar a partir de `src/`.
 - Prefira TypeScript estrito. Não use `any`; para dados externos, comece com
   `unknown` e valide antes de usar.
 - Use `camelCase` para funções e variáveis, `PascalCase` para componentes e
@@ -65,7 +65,7 @@ chamada diretamente pela interface.
 - Prefira funções pequenas, nomes que expressem a ação e funções puras para
   validações e transições de estado.
 - Mantenha componentes visuais focados na apresentação. Coloque a interação
-  compartilhada do fluxo de linhas em hooks, como `use-line-workflow.ts`.
+  compartilhada do fluxo de linhas em hooks, como `src/hooks/use-line-workflow.ts`.
 - Componentes e layouts do Next.js são Server Components por padrão. Adicione
   `"use client"` somente aos componentes que realmente precisam de estado,
   eventos ou APIs do navegador.
@@ -76,19 +76,20 @@ chamada diretamente pela interface.
 
 ## 4. Contrato HTTP, geração de código e documentação (OpenAPI + Orval + Scalar)
 
-- `lib/api-spec/openapi.yaml` é a fonte canônica única do contrato HTTP, tanto
-  para a geração de código (Orval) quanto para a documentação interativa
+- `openapi.yaml` (na raiz do projeto) é a fonte canônica única do contrato HTTP,
+  tanto para a geração de código (Orval) quanto para a documentação interativa
   (Scalar).
-- Gere os clientes React Query e schemas Zod com
-  `pnpm --filter @workspace/api-spec run codegen`. Nunca edite os arquivos
-  gerados à mão.
+- Gere os clientes React Query e schemas Zod em `src/lib/api-client/` com
+  `npm run codegen` (configurado via `orval.config.ts`). Nunca edite os
+  arquivos gerados dentro de `src/lib/api-client/` à mão.
 - Preserve `info.title: Api`, `servers.url: /api`, os operation IDs existentes
-  e o mutator `customFetch`; a geração depende dessas convenções.
+  e o mutator `customFetch` (`src/lib/custom-fetch.ts`); a geração depende
+  dessas convenções.
 - Exponha a documentação interativa da API em `GET /api/docs`
   (`src/app/api/docs/route.ts`) usando o Scalar via CDN oficial
   (`https://cdn.jsdelivr.net/npm/@scalar/api-reference`), lendo diretamente o
-  `lib/api-spec/openapi.yaml` do disco sem duplicar a especificação e sem
-  instalar dependências extras.
+  `openapi.yaml` da raiz do disco sem duplicar a especificação e sem instalar
+  dependências extras.
 - Mantenha `summary`, `description` e exemplos claros no `openapi.yaml` para que
   a referência do Scalar permaneça completa e legível.
 - Endpoints obrigatórios:
@@ -106,8 +107,8 @@ chamada diretamente pela interface.
   não exponha stack traces, credenciais nem respostas brutas da TOM.
 - Use `runtime = "nodejs"`, `dynamic = "force-dynamic"` e
   `Cache-Control: no-store` nas rotas de negócio e em `/api/docs`.
-- Toda mudança no formato HTTP começa no OpenAPI. Em seguida, regenere os
-  clientes e schemas, verifique a renderização no Scalar e atualize os testes e
+- Toda mudança no formato HTTP começa no `openapi.yaml`. Em seguida, rode
+  `npm run codegen`, verifique a renderização no Scalar e atualize os testes e
   consumidores afetados.
 
 ## 5. Modelo e invariantes do domínio
@@ -164,9 +165,10 @@ chamada diretamente pela interface.
   `POST https://1wvur6wjzc.execute-api.us-east-1.amazonaws.com/phone-number`.
 - Envie `areaCode`, `subscriptionPlanId` e `idempotencyKey` igual ao código
   emitido pelo backend. A resposta válida esperada contém `phoneNumber`.
-- Obtenha `TOM_API_KEY` exclusivamente pelo fluxo seguro de Secrets do Replit,
-  via variável server-side `process.env.TOM_API_KEY`. Nunca use prefixo
-  `NEXT_PUBLIC_`, prop, localStorage ou sessionStorage para credenciais.
+- Obtenha `TOM_API_KEY` exclusivamente via variável de ambiente server-side
+  `process.env.TOM_API_KEY` (definida localmente em `.env.local`, nunca
+  versionada no Git). Nunca use prefixo `NEXT_PUBLIC_`, prop, localStorage ou
+  sessionStorage para credenciais.
 - O limite é configurável pelo backend, inicialmente 60 segundos. Cancele a
   espera de rede com `AbortController` ao atingir o limite e cubra a leitura do
   corpo da resposta no mesmo prazo.
@@ -182,7 +184,7 @@ chamada diretamente pela interface.
 
 ## 8. Interface e comportamento assíncrono
 
-- Use os hooks e tipos gerados de `@workspace/api-client-react`; componentes
+- Use os hooks e tipos gerados pelo Orval em `@/lib/api-client`; componentes
   não fazem `fetch` direto.
 - Configure TanStack Query com `retry: false`,
   `refetchOnWindowFocus: false` e `refetchOnReconnect: false` para consultas;
@@ -217,9 +219,8 @@ chamada diretamente pela interface.
   gravação bem-sucedida e falha do `sessionStorage`, recuperação após recarregar
   e prevenção contra envio duplicado.
 - Antes de entregar alterações de código, execute:
-  - `pnpm --filter @workspace/salvy run typecheck`
-  - `pnpm --filter @workspace/salvy run test`
-  - `pnpm run typecheck`
-- Mudanças em `lib/api-spec/openapi.yaml` também exigem regeneração via Orval,
-  verificação da documentação interativa no Scalar (`/api/docs`) e testes do
-  cliente e dos endpoints afetados.
+  - `npm run typecheck`
+  - `npm test`
+- Mudanças em `openapi.yaml` também exigem regeneração via `npm run codegen`
+  (Orval), verificação da documentação interativa no Scalar (`/api/docs`) e
+  testes do cliente e dos endpoints afetados.
